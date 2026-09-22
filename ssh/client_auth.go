@@ -532,10 +532,28 @@ func handleAuthResponse(c packetConn) (authResult, []string, error) {
 	}
 }
 
+// [TOLERANT-PATCH ssh-tolerant] begin
+//
+// Banner messages (SSH_MSG_USERAUTH_BANNER, RFC 4252 §5.4) are advisory,
+// display-only data. Non-conformant servers emit banners that the strict
+// wire-format parser rejects, e.g.:
+//
+//   - trailing bytes after the two string fields
+//     -> "ssh: parse error in message type 53" (aborts the handshake)
+//   - missing language tag or bogus string lengths
+//     -> "ssh: unmarshal error for field ..." / "ssh: short read"
+//
+// Dropping a malformed banner matches OpenSSH's lenient behavior: the
+// message has no authentication or security semantics, so discarding it
+// cannot weaken the handshake. See docs/RCA-type53.md in this repository
+// for the full root-cause analysis.
+//
+// [TOLERANT-PATCH] end
 func handleBannerResponse(c packetConn, packet []byte) error {
 	var msg userAuthBannerMsg
 	if err := Unmarshal(packet, &msg); err != nil {
-		return err
+		// [TOLERANT-PATCH ssh-tolerant] swallow malformed banner packets
+		return nil
 	}
 
 	transport, ok := c.(*handshakeTransport)
